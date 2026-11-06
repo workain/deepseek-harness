@@ -124,9 +124,14 @@ export type PeerAdmission =
  * Resolves the caller identity of one admitted request on a multi-tenant deployment.
  *
  * Registering one puts this Host in multi-tenant mode and the resolver becomes the ONLY source of
- * caller identity: `admit()` stops falling back to the owner Peer entirely, so a request the
- * resolver cannot identify is rejected rather than silently admitted as the local owner. That
- * fallback is safe on a single-user Host and is exactly the wrong default on a shared one.
+ * caller identity **on the admission path**: `admit()` consults it before every owner path and has
+ * no fall-through, so a request the resolver cannot identify is rejected rather than silently
+ * admitted as the local owner. That fallback is safe on a single-user Host and is exactly the wrong
+ * default on a shared one.
+ *
+ * Scoped deliberately: this closes ADMISSION, not Peer *creation*. `authorizeConnect()` on
+ * `/connect` still mints an owner Peer, which is unreachable through `admit()` while a resolver is
+ * registered but is not removed by registering one.
  *
  * @param request - the request, after the Host/Origin trust fence has already accepted it.
  * @returns the caller's principal with a stable key identifying its Peer, or the status to reject
@@ -243,10 +248,21 @@ export interface HostConnectionHandle {
   /**
    * Apply Connection's Host/Origin checks and browser authentication to
    * another Web route.
+   *
+   * **Refuses a non-owner Peer with 403 unless the route opts in.** This primitive answers only
+   * "is this an admitted Peer" and discards the principal, so a route built on it cannot see who
+   * called and performs no per-caller authorization of its own. On a single-owner Host that was
+   * sufficient, because every admitted Peer *was* the owner. Multi-tenant admission breaks that
+   * implicit equivalence, which would silently widen every existing consumer from owner-only to
+   * any-tenant — so the refusal is the default and a route that can genuinely handle a non-owner
+   * must say so. This is the same rule the shared `/api` Fetch handler already applies to exact
+   * routes, which "do not pass through the Gateway" and are refused to every non-owner "until each
+   * route declares its own access rule".
    * @param request - request headers from the HTTP or upgrade request.
+   * @param options - `nonOwner: 'allow'` for a route that authorizes callers itself.
    * @returns rejection status, or undefined when the route may accept the request.
    */
-  requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection
+  requestRejection(request: ConnectionTrustRequest, options?: { readonly nonOwner?: 'allow' | 'refuse' }): ConnectionRequestRejection
 
   /**
    * Admit an HTTP request against its signed browser or API credential and live Peer.

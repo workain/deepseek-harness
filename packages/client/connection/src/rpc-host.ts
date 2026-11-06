@@ -129,10 +129,24 @@ export class HostConnectionService extends Service implements HostConnectionHand
     }
   }
 
-  /** Apply the Host/Origin fence and require an authenticated live Peer. */
-  requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection {
+  /**
+   * Apply the Host/Origin fence, require an authenticated live Peer, and refuse a non-owner
+   * unless the route opts in. See the handle's own contract for why the refusal is the default.
+   */
+  requestRejection(
+    request: ConnectionTrustRequest,
+    options: { readonly nonOwner?: 'allow' | 'refuse' } = {},
+  ): ConnectionRequestRejection {
     const admission = this.admit(request)
-    return 'rejection' in admission ? admission.rejection : undefined
+    if ('rejection' in admission) return admission.rejection
+    // Routes reached through this primitive ask nothing of `remoteAccess` and never see the
+    // principal, so before multi-tenant admission existed "admitted" was equivalent to "the
+    // owner" and that was a safe check. Making admission able to return a non-owner silently
+    // re-meant every such route -- so every one of them keeps its pre-existing owner-only
+    // semantics by default, and widening one is an explicit, reviewable act at its call site.
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+    if (options.nonOwner !== 'allow' && admission.peer.principal.kind !== 'owner') return 403
+    return undefined
   }
 
   /** Browser requests share an owner Peer; API HTTP does not depend on an attached socket. */
