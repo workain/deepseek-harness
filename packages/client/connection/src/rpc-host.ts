@@ -31,6 +31,7 @@ import type {
   ConnectionTrustRequest,
   HostConnectionHandle,
   HostConnectionRpc,
+  PeerPrincipalResolver,
 } from './rpc.ts'
 
 const INVALID_REQUEST_RPC_ID = RpcId('invalid-request')
@@ -75,6 +76,10 @@ export class HostConnectionService extends Service implements HostConnectionHand
   private disposed = false
   private readonly interceptors = new Map<string, ConnectionRpcInterceptor>()
   private readonly fetchRoutes = new Map<string, RegisteredFetchRoute>()
+  /** Multi-tenant caller-identity resolver; absent on a single-owner Host. */
+  private principalResolver: PeerPrincipalResolver | undefined
+  /** One Peer per resolved caller key, so a caller's streams and interactions stay one Peer. */
+  private readonly tenantPeers = new Map<string, Peer>()
 
   readonly allowsRemoteAuthorities: boolean
 
@@ -94,8 +99,13 @@ export class HostConnectionService extends Service implements HostConnectionHand
     this.browserPeer = new Peer(ctx, { principal: { kind: 'owner' } })
     ctx.effect(() => async () => {
       this.disposed = true
-      const peers = [this.browserPeer, ...Array.from(this.peers.values(), record => record.peer)]
+      const peers = [
+        this.browserPeer,
+        ...Array.from(this.peers.values(), record => record.peer),
+        ...Array.from(this.tenantPeers.values()),
+      ]
       this.peers.clear()
+      this.tenantPeers.clear()
       await Promise.all(peers.map(peer => peer.dispose()))
     }, 'client-connection: Peer scopes')
     this.allowsRemoteAuthorities = trustedHosts.some(isRemoteAuthority)
@@ -130,10 +140,56 @@ export class HostConnectionService extends Service implements HostConnectionHand
     if (!this.isTrusted(request)) return { rejection: 403 }
     if (this.disposed) return { rejection: 401 }
     const secure = this.owner.get('webServer')?.protocol === 'https:'
+    // Multi-tenant mode: the resolver is the ONLY source of caller identity. Deliberately placed
+    // before every owner path and deliberately without a fall-through -- a request this resolver
+    // cannot identify must be rejected, never admitted as the Host's owner, which would hand it
+    // every object on the Host because `decide()` does not check the owner at all.
+    const resolver = this.principalResolver
+    if (resolver !== undefined) return this.admitResolved(resolver, request)
     if (this.browserAuth.isAuthenticated(request, secure)) return { peer: this.browserPeer }
     const id = this.browserAuth.authenticateApi(request, secure)
     const record = id === undefined ? undefined : this.peers.get(id)
     return record === undefined ? { rejection: 401 } : { peer: record.peer }
+  }
+
+  /**
+   * Admit one request through the multi-tenant resolver.
+   *
+   * A resolver that throws is treated as a refusal, not as an absent resolver: an identity layer
+   * that fails must close the door rather than open it.
+   */
+  private admitResolved(resolver: PeerPrincipalResolver, request: ConnectionTrustRequest): PeerAdmission {
+    let resolved: ReturnType<PeerPrincipalResolver>
+    try {
+      resolved = resolver(request)
+    } catch (error) {
+      this.owner.logger.warn('client-connection: the principal resolver threw; rejecting the request')
+      this.owner.logger.warn(error)
+      return { rejection: 401 }
+    }
+    if ('rejection' in resolved) return resolved
+    const existing = this.tenantPeers.get(resolved.peerKey)
+    if (existing !== undefined) return { peer: existing }
+    const peer = new Peer(this.owner, { principal: resolved.principal })
+    this.tenantPeers.set(resolved.peerKey, peer)
+    return { peer }
+  }
+
+  /** Register the deployment's caller-identity resolver; see the handle's own contract. */
+  registerPrincipalResolver(resolver: PeerPrincipalResolver): () => void {
+    const dispose = this.ctx.effect(() => {
+      if (this.principalResolver !== undefined) {
+        throw new Error('connection: a principal resolver is already registered')
+      }
+      this.principalResolver = resolver
+      return async () => {
+        this.principalResolver = undefined
+        const peers = Array.from(this.tenantPeers.values())
+        this.tenantPeers.clear()
+        await Promise.all(peers.map(peer => peer.dispose()))
+      }
+    }, 'client-connection: principal resolver')
+    return () => { void dispose() }
   }
 
   /** Create one in-process Peer owned by the Context that read this service. */

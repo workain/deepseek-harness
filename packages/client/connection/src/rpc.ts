@@ -120,6 +120,22 @@ export type PeerAdmission =
   | { readonly peer: PeerScope }
   | { readonly rejection: 401 | 403 }
 
+/**
+ * Resolves the caller identity of one admitted request on a multi-tenant deployment.
+ *
+ * Registering one puts this Host in multi-tenant mode and the resolver becomes the ONLY source of
+ * caller identity: `admit()` stops falling back to the owner Peer entirely, so a request the
+ * resolver cannot identify is rejected rather than silently admitted as the local owner. That
+ * fallback is safe on a single-user Host and is exactly the wrong default on a shared one.
+ *
+ * @param request - the request, after the Host/Origin trust fence has already accepted it.
+ * @returns the caller's principal with a stable key identifying its Peer, or the status to reject
+ *   with. Never `undefined`: "I do not know" must be spelled as a rejection.
+ */
+export type PeerPrincipalResolver = (request: ConnectionTrustRequest) =>
+  | { readonly principal: Principal; readonly peerKey: string }
+  | { readonly rejection: 401 | 403 }
+
 /** Socket admission claims API ownership until its carrier calls release, including failed upgrades. */
 export type ConnectionAdmission =
   | {
@@ -238,6 +254,18 @@ export interface HostConnectionHandle {
    * @returns the credential's Peer, or the rejection status.
    */
   admit(request: ConnectionTrustRequest): PeerAdmission
+
+  /**
+   * Put this Host in multi-tenant mode: resolve every admitted request's caller identity through
+   * `resolver` instead of admitting it as the local owner.
+   *
+   * Only one resolver may be registered; a second throws, so two plugins cannot each believe they
+   * own identity. The registration belongs to the calling fiber and removing it returns the Host to
+   * single-owner behaviour.
+   * @param resolver - the deployment's caller-identity resolver.
+   * @returns disposer removing it.
+   */
+  registerPrincipalResolver(resolver: PeerPrincipalResolver): () => void
 
   /**
    * Create an independent in-process Peer, disposed with the Context that read `ctx.connection`.
