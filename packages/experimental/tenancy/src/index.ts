@@ -18,6 +18,9 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+// Loaded for its `Context.remoteAccess` declaration merge; the `/types` subpath this package
+// imports elsewhere does not carry it.
+import type {} from '@deepseek-ai/dsh-api-remote-access'
 import { createTenantAccessPolicy, type TenantClock } from './access-policy.ts'
 import { TenantScopeStore } from './scope.ts'
 
@@ -61,14 +64,18 @@ export function apply(ctx: Context, config: Config = {}): void {
   const store = new TenantScopeStore(config.scopeMaxAgeMs ?? DEFAULT_SCOPE_MAX_AGE_MS)
   const clock: TenantClock = { nowMs: () => Date.now() }
 
-  ctx.provide('tenantScope', store, true)
+  // No availability predicate: cordis's third parameter is `check?: () => boolean`, and a
+  // non-callable value is worse than none -- `Fiber._checkImpl` throws on `check.call(...)`,
+  // swallows it, and DELETES the service from the dependent's store, so `tenantScope` reads as
+  // absent to every injector. Omitting it is what `true` meant: always available.
+  ctx.provide('tenantScope', store)
 
   ctx.inject(['remoteAccess'], (scope) => {
     scope.remoteAccess.registerPolicy('tenant', createTenantAccessPolicy(store, clock))
     // Every refresh, drop and revocation must reach open snapshot streams, which recompute only
     // after `invalidate()`. Without this, a revoked object keeps its grant on an open page until
     // something unrelated changes -- the same latency upstream documents for `workspace/follow`.
-    scope.effect(() => store.onChange(tenantId => {
+    scope.effect(() => store.onChange((tenantId) => {
       scope.remoteAccess.invalidate()
       scope.logger.debug(`tenancy: scope projection changed for tenant ${JSON.stringify(tenantId)}`)
     }), 'tenancy: scope invalidation')

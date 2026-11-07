@@ -28,6 +28,8 @@ import type {
   RemoteAccessPolicy,
   RemoteAccessRequest,
 } from '@deepseek-ai/dsh-api-remote-access/types'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import { hasRole, type TenantPrincipal } from './principal.ts'
 import type { TenantScopeFacts } from './scope.ts'
 import {
@@ -87,7 +89,10 @@ export function createTenantAccessPolicy(
       // One binding per object the control plane put in scope. Nothing else is named, so any other
       // object has no binding and `decide()` refuses it without this policy being consulted again.
       for (const sessionId of facts.sessionIds(principal.tenantId)) {
-        const resource = { kind: 'session', id: sessionId } as const
+        // `TenantScopeFacts` keys objects by opaque string; the framework's resource ids are
+        // branded (`SessionId`/`WorkspaceId`). Brand at this boundary -- re-typing the public
+        // store is a wider change than making this package compile.
+        const resource = { kind: 'session', id: sessionId as SessionId } as const
         bindings.push({ role: TENANT_SESSION_READ_ROLE, resource })
         bindings.push({
           role: TENANT_SESSION_WRITE_ROLE,
@@ -102,7 +107,8 @@ export function createTenantAccessPolicy(
         })
       }
       for (const workspaceId of facts.workspaceIds(principal.tenantId)) {
-        const resource = { kind: 'workspace', id: workspaceId } as const
+        // Branded at the boundary, same reason as the session resource above.
+        const resource = { kind: 'workspace', id: workspaceId as WorkspaceId } as const
         bindings.push({ role: TENANT_WORKSPACE_READ_ROLE, resource })
         bindings.push({
           role: TENANT_WORKSPACE_ADMIN_ROLE,
