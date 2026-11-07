@@ -11067,6 +11067,18 @@ importers:
         specifier: workspace:*
         version: link:../../core/tools
 
+  packages/experimental/tenancy:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-api-remote-access':
+        specifier: workspace:*
+        version: link:../../api/remote-access
+      '@deepseek-ai/dsh-typert-protocol':
+        specifier: workspace:*
+        version: link:../../typert/protocol
+
   packages/experimental/terminal-bundle:
     dependencies:
       '@deepseek-ai/dsh-terminal':
