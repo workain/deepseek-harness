@@ -10138,6 +10138,21 @@ importers:
         specifier: workspace:*
         version: link:../../session/working-directory
 
+  packages/experimental/frontdoor-identity:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:*
+        version: link:../../client/connection
+      '@deepseek-ai/dsh-experimental-tenancy':
+        specifier: workspace:*
+        version: link:../tenancy
+      '@deepseek-ai/dsh-typert-protocol':
+        specifier: workspace:*
+        version: link:../../typert/protocol
+
   packages/experimental/hook-protocol:
     devDependencies:
       '@deepseek-ai/cordis':

@@ -31,6 +31,7 @@ export type {
   ConnectionRpcResult,
   ConnectionRequestBodyMode,
   ConnectionTrustRequest,
+  PeerPrincipalResolver,
   ClientRequest,
   HostConnectionHandle,
   HostConnectionFetch,
