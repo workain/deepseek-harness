@@ -108,17 +108,17 @@ export class TenantScopeStore implements TenantScopeFacts {
     return this.snapshots.get(tenantId)?.roles[subjectId] ?? []
   }
 
-  allowsSession = (tenantId: string, sessionId: string): boolean =>
+  allowsSession: (tenantId: string, sessionId: string) => boolean = (tenantId, sessionId) =>
     this.snapshots.get(tenantId)?.sessionIds.includes(sessionId) ?? false
 
-  allowsWorkspace = (tenantId: string, workspaceId: string): boolean =>
+  allowsWorkspace: (tenantId: string, workspaceId: string) => boolean = (tenantId, workspaceId) =>
     this.snapshots.get(tenantId)?.workspaceIds.includes(workspaceId) ?? false
 
-  sessionIds = (tenantId: string): readonly string[] => this.snapshots.get(tenantId)?.sessionIds ?? []
+  sessionIds: (tenantId: string) => readonly string[] = tenantId => this.snapshots.get(tenantId)?.sessionIds ?? []
 
-  workspaceIds = (tenantId: string): readonly string[] => this.snapshots.get(tenantId)?.workspaceIds ?? []
+  workspaceIds: (tenantId: string) => readonly string[] = tenantId => this.snapshots.get(tenantId)?.workspaceIds ?? []
 
-  isFresh = (tenantId: string, nowMs: number): boolean => {
+  isFresh: (tenantId: string, nowMs: number) => boolean = (tenantId, nowMs) => {
     const snapshot = this.snapshots.get(tenantId)
     if (snapshot === undefined) return false
     const age = nowMs - snapshot.fetchedAtMs
