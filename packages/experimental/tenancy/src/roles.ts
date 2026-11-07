@@ -96,6 +96,41 @@ export const TENANT_SESSION_ADMIN_ROLE: RemoteAccessRole<'session'> = {
   actions: ['workspace/archiveSession', 'workspace/unarchiveSession'],
 }
 
+/**
+ * Creating a Session INSIDE one workspace the tenant already owns — "spawn" in the acceptance
+ * criteria's vocabulary (harness-control#1952, hc#1955).
+ *
+ * ## Why this is a WORKSPACE role and must never become a global one
+ *
+ * `session/create` accepts `workspaceId` OR `cwd` (`session-controller/src/types.ts:270-274`), and
+ * the controller derives the directory rather than trusting it:
+ * `cwd = workspace?.path ?? request.cwd ?? defaultCwd` (`commands.ts:135`). The workspace resource
+ * kind is registered by FIELD (`api/workspace-controller/src/index.ts:73`,
+ * `{ field: 'workspaceId' }`), and `defaultFieldId` (`gateway/src/access.ts:165`) reads that field
+ * off the request object, returning `undefined` when the request does not own it. That produces
+ * exactly the asymmetry this grant relies on:
+ *
+ * - `create({ workspaceId, sessionId })` resolves THAT workspace, so `decide()` checks it against
+ *   the tenant's scope projection. Cross-tenant is refused `tenant-object-not-in-scope`. The `cwd`
+ *   is `workspace.path` — never a value the caller supplied.
+ * - `create({ cwd })` resolves NO workspace and is therefore decided on `global` alone. Because
+ *   `session/create` is absent from `TENANT_GLOBAL_ROLE`, deny-by-default refuses it.
+ *
+ * So the caller cannot choose a directory on the one path that is granted. Putting this action in
+ * `TENANT_GLOBAL_ROLE` instead would destroy that: `cwd` is not a resource kind (only `session` and
+ * `workspace` exist), no policy can inspect it, and `createAgent` does not merely record it —
+ * `await mkdir(cwd, { recursive: true })` (`api/session-controller/src/agent.ts:438`). Any tenant
+ * could then own any absolute path on the Host and bring it into existence.
+ *
+ * That one-line edit is guarded mechanically by `global_role_cwd_gate.py`, which is demonstrated
+ * going red on precisely it. Do not move this action without reading hc#1955.
+ */
+export const TENANT_WORKSPACE_SPAWN_ROLE: RemoteAccessRole<'workspace'> = {
+  name: 'tenancy:workspace-spawn',
+  resource: 'workspace',
+  actions: ['session/create'],
+}
+
 /** Following one workspace that holds a session the tenant may see. */
 export const TENANT_WORKSPACE_READ_ROLE: RemoteAccessRole<'workspace'> = {
   name: 'tenancy:workspace-read',
@@ -122,6 +157,7 @@ export const TENANT_ROLES = [
   TENANT_SESSION_WRITE_ROLE,
   TENANT_SESSION_ADMIN_ROLE,
   TENANT_WORKSPACE_READ_ROLE,
+  TENANT_WORKSPACE_SPAWN_ROLE,
   TENANT_WORKSPACE_ADMIN_ROLE,
 ] as const
 

@@ -39,6 +39,7 @@ import {
   TENANT_SESSION_WRITE_ROLE,
   TENANT_WORKSPACE_ADMIN_ROLE,
   TENANT_WORKSPACE_READ_ROLE,
+  TENANT_WORKSPACE_SPAWN_ROLE,
 } from './roles.ts'
 
 /** Refusal codes this policy produces; each names one cause, so a client can classify it. */
@@ -110,6 +111,20 @@ export function createTenantAccessPolicy(
         // Branded at the boundary, same reason as the session resource above.
         const resource = { kind: 'workspace', id: workspaceId as WorkspaceId } as const
         bindings.push({ role: TENANT_WORKSPACE_READ_ROLE, resource })
+        // "spawn": creating a Session inside a workspace the tenant already owns. A member may
+        // do this, so it carries the same write condition as `session/prompt` rather than the
+        // admin one -- creating work inside your own workspace is not a lifecycle-admin act.
+        //
+        // Bound on the WORKSPACE resource deliberately. See TENANT_WORKSPACE_SPAWN_ROLE's own note:
+        // a `create` naming a workspace is decided against that workspace and takes its `cwd` from
+        // `workspace.path`, while a `create` naming a raw `cwd` resolves no resource, falls to
+        // `global`, and is refused because this action is absent there. Moving it to the global
+        // role would let any tenant own any absolute path on the Host (hc#1955).
+        bindings.push({
+          role: TENANT_WORKSPACE_SPAWN_ROLE,
+          resource,
+          condition: () => (writes ? ALLOW : deny('tenant-read-only')),
+        })
         bindings.push({
           role: TENANT_WORKSPACE_ADMIN_ROLE,
           resource,
