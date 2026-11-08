@@ -27,7 +27,14 @@ import type {
 } from '@deepseek-ai/dsh-typert-protocol'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
 import type { ClientRemote } from '../src/client/index.ts'
-import { apply, inject, isRemoteFailure, RemoteStream } from '../src/client/index.ts'
+import {
+  apply,
+  inject,
+  isRemoteFailure,
+  remoteFailureOrigin,
+  RemoteStream,
+  RemoteWithdrawnError,
+} from '../src/client/index.ts'
 import {
   ClientUplinkQueue,
   RemoteStreamCarrierError,
@@ -3475,3 +3482,95 @@ async function drainStream(source: AsyncIterable<unknown>): Promise<unknown[]> {
   for await (const value of source) values.push(value)
   return values
 }
+
+describe('Remote failure origin', () => {
+  /** The failure branch of one real invocation, or a test failure if it succeeded. */
+  async function failureOf(outcome: Promise<RemoteResult<unknown>>) {
+    const result = await outcome
+    if (result.ok) throw new Error('expected the Client API invocation to report a failure')
+    return result.error
+  }
+
+  it('reports host for a failure rebuilt from a Host answer, which carries no cause at all', async () => {
+    const rpcError = { code: 'gateway/internal' as const, message: 'host failed', details: {} }
+    const ctx = await bench(vi.fn<ConnectionHandle['rpc']['call']>().mockResolvedValue({ ok: false, error: rpcError }))
+    await ctx.remote.$mount({ package: '@fixture/probe', descriptors: [directDescriptor()] })
+
+    const error = await failureOf(ctx.remote.probe.create('agent-1', { objective: 'ship' }))
+    // The invariant the whole classification rests on: the wire carries only
+    // code/message/details, so a rebuilt failure has no own `cause` key.
+    expect(Object.hasOwn(error, 'cause')).toBe(false)
+    expect(remoteFailureOrigin(error)).toBe('host')
+  })
+
+  it('reports carrier for a transport throw and retains the carrier throw itself as the cause', async () => {
+    const thrown = new TypeError('Failed to fetch')
+    const ctx = await bench(vi.fn<ConnectionHandle['rpc']['call']>().mockRejectedValue(thrown))
+    await ctx.remote.$mount({ package: '@fixture/probe', descriptors: [directDescriptor()] })
+
+    const error = await failureOf(ctx.remote.probe.create('agent-1', { objective: 'ship' }))
+    expect(error.code).toBe('gateway/internal')
+    // Identity, not shape: the diagnostic that used to be discarded is the very object.
+    expect(error.cause).toBe(thrown)
+    expect(remoteFailureOrigin(error)).toBe('carrier')
+  })
+
+  it('reports carrier for a carrier throw that is not an Error', async () => {
+    const ctx = await bench(vi.fn<ConnectionHandle['rpc']['call']>().mockRejectedValue('carrier exploded'))
+    await ctx.remote.$mount({ package: '@fixture/probe', descriptors: [directDescriptor()] })
+
+    const error = await failureOf(ctx.remote.probe.create('agent-1', { objective: 'ship' }))
+    expect(error.cause).toBe('carrier exploded')
+    expect(remoteFailureOrigin(error)).toBe('carrier')
+  })
+
+  it('reports carrier even when the carrier threw undefined, which a value comparison would misread as a Host answer', async () => {
+    const ctx = await bench(vi.fn<ConnectionHandle['rpc']['call']>()
+      // A carrier may reject with anything, including undefined.
+      .mockImplementation(async () => { throw undefined }))
+    await ctx.remote.$mount({ package: '@fixture/probe', descriptors: [directDescriptor()] })
+
+    const error = await failureOf(ctx.remote.probe.create('agent-1', { objective: 'ship' }))
+    expect(error.cause).toBeUndefined()
+    expect(Object.hasOwn(error, 'cause')).toBe(true)
+    expect(remoteFailureOrigin(error)).toBe('carrier')
+  })
+
+  it('reports withdrawn, not carrier, when the namespace retired mid-call', async () => {
+    let resolveCall: (result: RemoteResult<unknown>) => void = () => {}
+    const call = vi.fn<ConnectionHandle['rpc']['call']>()
+      .mockImplementation(async () => await new Promise<RemoteResult<unknown>>((resolve) => { resolveCall = resolve }))
+    const ctx = await bench(call)
+    const dispose = await ctx.remote.$mount({ package: '@fixture/probe', descriptors: [directDescriptor()] })
+    const invocation = ctx.remote.probe.create('agent-1', { objective: 'ship' })
+    await vi.waitFor(() => { expect(call).toHaveBeenCalledTimes(1) })
+    await dispose()
+    resolveCall({ ok: true, value: { ref: 'goal-1' } })
+
+    const error = await failureOf(invocation)
+    expect(error.code).toBe('gateway/internal')
+    // Same code as a transport fault, and the distinction survives anyway.
+    expect(remoteFailureOrigin(error)).toBe('withdrawn')
+    expect(error.cause).toBeInstanceOf(RemoteWithdrawnError)
+  })
+
+  it('identifies the withdrawal marker structurally, so a separate module copy still classifies', () => {
+    const foreign = { isDSHRemoteWithdrawn: true, message: 'from another bundle' }
+    const error = new RemoteError('gateway/internal', 'client api: probe/create failed', {}, { cause: foreign })
+    expect(error.cause).not.toBeInstanceOf(RemoteWithdrawnError)
+    expect(remoteFailureOrigin(error)).toBe('withdrawn')
+  })
+
+  it('reports a caller-aborted call as carrier, separable by its own code', async () => {
+    const controller = new AbortController()
+    const ctx = await bench(vi.fn<ConnectionHandle['rpc']['call']>().mockImplementation(async () => {
+      controller.abort()
+      throw new Error('carrier aborted mid-flight')
+    }))
+    await ctx.remote.$mount({ package: '@fixture/probe', descriptors: [directDescriptor()] })
+
+    const error = await failureOf(ctx.remote.probe.create('agent-1', { objective: 'ship' }, controller.signal))
+    expect(error.code).toBe('gateway/cancelled')
+    expect(remoteFailureOrigin(error)).toBe('carrier')
+  })
+})

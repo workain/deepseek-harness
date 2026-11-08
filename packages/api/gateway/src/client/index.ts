@@ -817,9 +817,65 @@ function requireStrictCodec(codec: TypertCodec, endpoint: string, field: string)
   }
 }
 
+/**
+ * Marker cause for a withdrawal: the namespace retired, so no request was ever
+ * issued. A transport fault carries the carrier's own throw instead, so the two
+ * local origins stay separable — they need different advice (a withdrawal does
+ * not heal by retrying the same mount, an unreachable carrier does).
+ */
+export class RemoteWithdrawnError extends Error {
+  /** Structural marker: cross-realm/bundle identification never uses instanceof. */
+  readonly isDSHRemoteWithdrawn: true = true
+
+  /** @param endpoint - `<namespace>/<method>` whose mount had retired. */
+  constructor(endpoint: string) {
+    super(`client api: Remote method ${endpoint} is no longer mounted`)
+    this.name = 'RemoteWithdrawnError'
+  }
+}
+
+/** Where a delivered Remote failure came from, as far as the Client face can tell. */
+export type RemoteFailureOrigin = 'host' | 'carrier' | 'withdrawn'
+
+/**
+ * Classify a delivered Remote failure by ORIGIN, structurally — never by
+ * matching its message, which is prose and may be reworded or localized.
+ *
+ * The discrimination rests on one invariant: a `cause` survives in-process
+ * only (see {@link RemoteError}), and the Host encoder carries just
+ * `code`/`message`/`details`, so {@link rebuiltFailure} — the sole producer of
+ * a wire-delivered failure — constructs without `ErrorOptions` at all. The test
+ * is therefore the PRESENCE of the property, not its value: a carrier that
+ * threw `undefined` still yields an own `cause` key, while a rebuilt failure
+ * has none. Comparing `cause` to `undefined` would misread that carrier as a
+ * Host answer.
+ *
+ * This matters because `gateway/internal` is minted on BOTH sides: locally by
+ * {@link carrierFailure} and `withdrawn`, and by the Host folding any
+ * non-RemoteError throw. The code alone cannot separate those; the cause can.
+ *
+ * A caller-aborted call also reports `carrier` (it never reached the Host); it
+ * stays separately identifiable by its own `gateway/cancelled` code, so a
+ * consumer that distinguishes cancellation reads the code as well.
+ * @param error - a failure delivered on a `RemoteResult` error branch.
+ * @returns which side produced it.
+ */
+export function remoteFailureOrigin(error: RemoteFailure): RemoteFailureOrigin {
+  if (!Object.hasOwn(error, 'cause')) return 'host'
+  const cause: unknown = error.cause
+  // Structural, not instanceof: the marker may cross module or realm copies.
+  return typeof cause === 'object' && cause !== null
+    && (cause as { isDSHRemoteWithdrawn?: unknown }).isDSHRemoteWithdrawn === true
+    ? 'withdrawn'
+    : 'carrier'
+}
+
 /** The namespace retired before or during the call, so no request outcome exists. */
 function withdrawn(endpoint: string): Extract<RemoteResult<never>, { readonly ok: false }> {
-  return internalFailure(`client api: Remote method ${endpoint} is no longer mounted`)
+  return internalFailure(
+    `client api: Remote method ${endpoint} is no longer mounted`,
+    { cause: new RemoteWithdrawnError(endpoint) },
+  )
 }
 
 /**
@@ -830,7 +886,13 @@ function withdrawn(endpoint: string): Extract<RemoteResult<never>, { readonly ok
  * @returns the failed result.
  */
 export function carrierFailure(endpoint: string, error: unknown): Extract<RemoteResult<never>, { readonly ok: false }> {
-  return internalFailure(`client api: ${endpoint} failed: ${error instanceof Error ? error.message : String(error)}`)
+  // The carrier's own throw is retained as `cause`: it is the only record of
+  // what actually went wrong, and its presence is what later proves this
+  // failure was minted here rather than rebuilt from a Host answer.
+  return internalFailure(
+    `client api: ${endpoint} failed: ${error instanceof Error ? error.message : String(error)}`,
+    { cause: error },
+  )
 }
 
 /**
@@ -846,8 +908,8 @@ export function cancelledFailure(endpoint: string, cause: unknown): Extract<Remo
   }
 }
 
-function internalFailure(message: string): Extract<RemoteResult<never>, { readonly ok: false }> {
-  return { ok: false, error: new RemoteError('gateway/internal', message, {}) }
+function internalFailure(message: string, options?: ErrorOptions): Extract<RemoteResult<never>, { readonly ok: false }> {
+  return { ok: false, error: new RemoteError('gateway/internal', message, {}, options) }
 }
 
 /**
