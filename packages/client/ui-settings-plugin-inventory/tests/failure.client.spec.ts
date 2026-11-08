@@ -26,6 +26,16 @@ function withdrawn(): RemoteError {
   )
 }
 
+/** A local cause carrying an arbitrary value under the withdrawal marker key. */
+function markedCause(marker: unknown): RemoteError {
+  return new RemoteError(
+    'gateway/internal',
+    `client api: ${ENDPOINT} failed: fixture`,
+    {},
+    { cause: { isDSHRemoteWithdrawn: marker } },
+  )
+}
+
 describe('plugin inventory failure classification', () => {
   it('classifies a Host refusal as server, carrying the Host code and not the wrapper chain', () => {
     const error = rebuilt('plugin/unavailable', 'inventory offline')
@@ -63,6 +73,11 @@ describe('plugin inventory failure classification', () => {
       { error: carrier(new TypeError('Failed to fetch')), origin: 'carrier', kind: 'unreachable' },
       { error: carrier(undefined), origin: 'carrier', kind: 'unreachable' },
       { error: withdrawn(), origin: 'withdrawn', kind: 'withdrawn' },
+      // A truthy-but-not-`true` marker is NOT a withdrawal. Both classifiers
+      // test `=== true`; this row is what fails a mirror-only widening to a
+      // loose check, which the enumerated rows above would otherwise let pass.
+      { error: markedCause('yes'), origin: 'carrier', kind: 'unreachable' },
+      { error: markedCause(true), origin: 'withdrawn', kind: 'withdrawn' },
     ] as const
     // This is the anti-drift gate for deriving the same facts locally rather
     // than importing the Gateway classifier into a shipped Client bundle.

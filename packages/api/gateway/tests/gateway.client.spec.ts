@@ -6,6 +6,7 @@ import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { z } from 'zod'
 import { RemoteMock } from '@deepseek-ai/dsh-remote-mock'
 import { openConnectionWebSocket } from '@deepseek-ai/dsh-client-connection/src/client/socket.ts'
+import { createWebConnectionRpc } from '@deepseek-ai/dsh-client-connection/src/client/rpc.ts'
 import {
   apply as applyConnection,
   installConnection,
@@ -29,6 +30,7 @@ import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
 import type { ClientRemote } from '../src/client/index.ts'
 import {
   apply,
+  carrierFailure,
   inject,
   isRemoteFailure,
   remoteFailureOrigin,
@@ -3579,6 +3581,45 @@ describe('Remote failure origin', () => {
 
     const error = await failureOf(ctx.remote.probe.create('agent-1', { objective: 'ship' }, controller.signal))
     expect(error.code).toBe('gateway/cancelled')
+    expect(remoteFailureOrigin(error)).toBe('carrier')
+  })
+})
+
+describe('Remote carrier fold: a response that arrived and is unusable', () => {
+  /**
+   * Fold a real `rpc.call` throw the way `invoke` does. The caller is the
+   * shipped one, not a stand-in: these two throw sites live inside `rpc.call`
+   * unconditionally, so a fixture reimplementing it would prove nothing about
+   * which of them a consumer can actually reach.
+   */
+  async function foldRealCall(response: Response) {
+    const rpc = createWebConnectionRpc(async () => response)
+    try {
+      await rpc.call('/api', 'probe/create', { args: [] })
+      throw new Error('expected the RPC caller to throw')
+    }
+    catch (error) {
+      return carrierFailure('probe/create', error).error
+    }
+  }
+
+  // Both of these reach `carrierFailure`, so both report `carrier` — even
+  // though the server answered. A consumer rendering `carrier` as "could not
+  // reach the server" would be asserting something false here, which is why
+  // the inventory tab's copy names an unusable RESPONSE rather than an
+  // unreachable server. A decode failure folds the same way, but
+  // `pluginInventory/list` carries no result `decode`, so that route is latent.
+  it('reports carrier for a non-2xx status, which the server did answer', async () => {
+    const error = await foldRealCall(new Response('boom', { status: 500 }))
+    expect(error.message).toBe('client api: probe/create failed: transport failure for /api/probe/create: HTTP 500')
+    expect(remoteFailureOrigin(error)).toBe('carrier')
+  })
+
+  it('reports carrier for an envelope that arrived and could not be read', async () => {
+    const error = await foldRealCall(new Response(JSON.stringify({ nope: true }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }))
+    expect(error.message).toBe('client api: probe/create failed: connection: invalid server-response envelope')
     expect(remoteFailureOrigin(error)).toBe('carrier')
   })
 })
