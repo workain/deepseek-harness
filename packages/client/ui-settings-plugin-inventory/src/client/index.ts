@@ -11,9 +11,11 @@ import type {} from '@deepseek-ai/dsh-client-ui-agent-preset/client'
 // Inline-safe shared fold: shipped ids map to dictionary keys in one home.
 import { presetDisplayText } from '@deepseek-ai/dsh-agent-preset-registry/display'
 import { PluginInventorySettingsTab, type PluginInventorySettingsTabInjected } from './PluginInventorySettingsTab.tsx'
+import { inventoryFailure, PluginInventoryReadError } from './failure.ts'
 import { en, ja, es, fr, de, ru, pt, zh, type PluginInventoryLocaleKey } from './locales.ts'
 
 export type { PluginInventorySettingsTabInjected, PluginInventorySettingsTabProps } from './PluginInventorySettingsTab.tsx'
+export type { PluginInventoryFailure } from './failure.ts'
 export type { PluginInventoryLocaleKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -38,7 +40,13 @@ export function apply(ctx: ClientContext): void {
     try {
       const result = await ctx.remote.pluginInventory.list()
       if (!result.ok) {
-        throw new Error(`pluginInventory.list failed: ${result.error.code}: ${result.error.message}`)
+        // The classification is derived here, where the typed failure still
+        // exists; the tab's rejection arm only ever sees a thrown value.
+        throw new PluginInventoryReadError(
+          `pluginInventory.list failed: ${result.error.code}: ${result.error.message}`,
+          inventoryFailure(result.error),
+          { cause: result.error },
+        )
       }
       return result.value
     }

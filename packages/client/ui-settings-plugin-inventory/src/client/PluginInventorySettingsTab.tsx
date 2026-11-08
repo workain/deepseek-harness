@@ -13,6 +13,7 @@ import {
 import type { StateDotState, TagTone } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { PluginInventoryLocaleKey } from './locales.ts'
+import { failureOf, type PluginInventoryFailure } from './failure.ts'
 import css from './PluginInventorySettingsTab.module.css'
 
 type PluginInventoryEntry = PluginInventorySnapshot['entries'][number]
@@ -47,7 +48,10 @@ type Translate = PluginInventorySettingsTabProps['t']
 
 type ViewState =
   | { readonly status: 'loading' }
-  | { readonly status: 'error' }
+  /* `failure` is undefined when the rejection carried no classification: an
+   * assembly fault rather than a delivered Remote failure. The generic line
+   * then stands alone, as it did for every cause before. */
+  | { readonly status: 'error'; readonly failure: PluginInventoryFailure | undefined }
   | { readonly status: 'ready'; readonly snapshot: PluginInventorySnapshot }
 
 const PHASE_KEYS = {
@@ -60,6 +64,16 @@ const PHASE_KEYS = {
 
 /** Placeholder cards the loading skeleton lays out in the cards grid. */
 const SKELETON_CARDS = [0, 1, 2, 3] as const
+
+/**
+ * The cause line shown under the generic error: which of the three causes this
+ * was, and for a Host refusal its own short code rather than the wrapper chain.
+ */
+function failureText(failure: PluginInventoryFailure, t: Translate): string {
+  if (failure.kind === 'unreachable') return t('errorUnreachable')
+  if (failure.kind === 'withdrawn') return t('errorWithdrawn')
+  return t('errorServer', { code: failure.code })
+}
 
 /** Localized accessible label for one root Fiber phase. */
 function phaseLabel(phase: PluginFiberPhase, t: Translate): string {
@@ -267,7 +281,7 @@ export function PluginInventorySettingsTab(
     let current = true
     void Promise.resolve().then(() => list()).then(
       (snapshot) => { if (current) setState({ status: 'ready', snapshot }) },
-      () => { if (current) setState({ status: 'error' }) },
+      (error: unknown) => { if (current) setState({ status: 'error', failure: failureOf(error) }) },
     )
     return () => { current = false }
   }, [list, request])
@@ -456,6 +470,11 @@ export function PluginInventorySettingsTab(
           <p className={css.statusWithDot} role="alert">
             <StateDot state="error" />{t('error')}
           </p>
+          {state.failure === undefined ? null : (
+            <p className={css.brokenNote} data-plugin-failure={state.failure.kind}>
+              {failureText(state.failure, t)}
+            </p>
+          )}
           <button type="button" onClick={retry}>{t('retry')}</button>
         </div>
       ) : null}

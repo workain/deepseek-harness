@@ -13,6 +13,9 @@ import type {
   PluginInventorySettingsTabProps,
 } from '../src/client/PluginInventorySettingsTab.tsx'
 import { en, zh, type PluginInventoryLocaleKey } from '../src/client/locales.ts'
+import { inventoryFailure, PluginInventoryReadError } from '../src/client/failure.ts'
+import { carrierFailure } from '@deepseek-ai/dsh-api-gateway/client'
+import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 
 afterEach(cleanup)
 
@@ -623,6 +626,55 @@ describe('PluginInventorySettingsTab', () => {
     fireEvent.click(screen.getByRole('button', { name: en.retry }))
     await waitFor(() => { expect(list).toHaveBeenCalledTimes(2) })
     expect(await screen.findByText(en.empty)).toBeTruthy()
+  })
+
+  /** The rejection the injection site builds for one delivered Remote failure. */
+  function readError(remote: RemoteError): PluginInventoryReadError {
+    return new PluginInventoryReadError(
+      `pluginInventory.list failed: ${remote.code}: ${remote.message}`,
+      inventoryFailure(remote),
+      { cause: remote },
+    )
+  }
+
+  it('names an unreachable carrier, without showing the transport message', async () => {
+    // A real carrier fold, so the rendered class is derived rather than asserted.
+    const remote = carrierFailure('pluginInventory/list', new TypeError('Failed to fetch')).error
+    render(<PluginInventorySettingsTab {...props(vi.fn<PluginInventorySettingsTabInjected['list']>()
+      .mockRejectedValue(readError(remote)))} />)
+
+    expect((await screen.findByRole('alert')).textContent).toBe(en.error)
+    expect(await screen.findByText(en.errorUnreachable)).toBeTruthy()
+    expect(screen.getByText(en.errorUnreachable).dataset.pluginFailure).toBe('unreachable')
+    // The classification reaches the page; the wrapper chain does not.
+    expect(screen.queryByText(/Failed to fetch/)).toBeNull()
+    expect(screen.queryByText(/gateway\/internal/)).toBeNull()
+  })
+
+  it('names a retired mount distinctly from an unreachable carrier', async () => {
+    const remote = new RemoteError(
+      'gateway/internal',
+      'client api: Remote method pluginInventory/list is no longer mounted',
+      {},
+      { cause: Object.assign(new Error('withdrawn'), { isDSHRemoteWithdrawn: true as const }) },
+    )
+    render(<PluginInventorySettingsTab {...props(vi.fn<PluginInventorySettingsTabInjected['list']>()
+      .mockRejectedValue(readError(remote)))} />)
+
+    expect(await screen.findByText(en.errorWithdrawn)).toBeTruthy()
+    expect(screen.getByText(en.errorWithdrawn).dataset.pluginFailure).toBe('withdrawn')
+    expect(screen.queryByText(en.errorUnreachable)).toBeNull()
+  })
+
+  it('names a Host refusal with the Host own code, not the wrapper chain', async () => {
+    const remote = new RemoteError('plugin/unavailable' as never, 'inventory offline', {} as never)
+    render(<PluginInventorySettingsTab {...props(vi.fn<PluginInventorySettingsTabInjected['list']>()
+      .mockRejectedValue(readError(remote)))} />)
+
+    const shown = await screen.findByText('The server reported an error: plugin/unavailable')
+    expect(shown.dataset.pluginFailure).toBe('server')
+    expect(screen.queryByText(/inventory offline/)).toBeNull()
+    expect(screen.queryByText(en.errorUnreachable)).toBeNull()
   })
 
   it('contains a synchronous Remote failure and ignores a result after unmount', async () => {
