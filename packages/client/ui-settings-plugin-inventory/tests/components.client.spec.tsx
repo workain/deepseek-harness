@@ -649,6 +649,11 @@ describe('PluginInventorySettingsTab', () => {
     // The classification reaches the page; the wrapper chain does not.
     expect(screen.queryByText(/Failed to fetch/)).toBeNull()
     expect(screen.queryByText(/gateway\/internal/)).toBeNull()
+    // The line no longer promises the fault is transient, so the Retry affordance
+    // is what carries that -- pinned here, for THIS class, because the wording
+    // decision rests on it. The button sits outside the failure guard, so losing
+    // it would be silent for every class at once.
+    expect(screen.getByRole('button', { name: en.retry })).toBeTruthy()
   })
 
   it('names a retired mount distinctly from an unreachable carrier', async () => {
