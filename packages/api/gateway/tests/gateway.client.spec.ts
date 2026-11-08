@@ -3561,6 +3561,14 @@ describe('Remote failure origin', () => {
     expect(remoteFailureOrigin(error)).toBe('withdrawn')
   })
 
+  it('reports host for any cause-less failure, which is the documented limit of this test', () => {
+    // A Host protocol violation is minted locally by the stream halves with no
+    // cause, and reads as `host`. That is what it means, but it is also the
+    // boundary of the proof: cause-less is read as "the Host produced this".
+    const violation = new RemoteError('gateway/internal', 'client api: stream frame is invalid', {})
+    expect(remoteFailureOrigin(violation)).toBe('host')
+  })
+
   it('reports a caller-aborted call as carrier, separable by its own code', async () => {
     const controller = new AbortController()
     const ctx = await bench(vi.fn<ConnectionHandle['rpc']['call']>().mockImplementation(async () => {

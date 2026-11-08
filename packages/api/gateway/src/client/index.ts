@@ -857,6 +857,15 @@ export type RemoteFailureOrigin = 'host' | 'carrier' | 'withdrawn'
  * A caller-aborted call also reports `carrier` (it never reached the Host); it
  * stays separately identifiable by its own `gateway/cancelled` code, so a
  * consumer that distinguishes cancellation reads the code as well.
+ *
+ * Scope, deliberately narrow: this reads a failure delivered on a
+ * `RemoteResult` error branch, where `rebuiltFailure` is the only producer of a
+ * cause-less value. Stream failures are THROWN rather than delivered, and the
+ * stream halves mint their own cause-less `gateway/internal` for a Host
+ * protocol violation (`journal-stream.ts`, `snapshot-stream.ts`); those read as
+ * `host`, which is what they mean, while `terminalStreamFailure` passes a cause
+ * and reads as `carrier`. Applied outside an error branch the answers remain
+ * sensible, but the proof above only covers the error branch.
  * @param error - a failure delivered on a `RemoteResult` error branch.
  * @returns which side produced it.
  */
