@@ -94,6 +94,38 @@ describe('ui-settings-plugin-inventory browser plugin', () => {
     await b.ctx.fiber.dispose()
   })
 
+  it('logs every rejected inventory read exactly once, cause intact', async () => {
+    const b = await bench()
+    declare(b.slots)
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    const entry = b.slots.entries('settings.plugins.tab')[0]!
+    const injected = (entry.inject as unknown as () => PluginInventorySettingsTabInjected)()
+    const logged = vi.spyOn(b.ctx.logger, 'error').mockImplementation(() => {})
+    onTestFinished(() => { logged.mockRestore() })
+
+    // (a) the Host answered and refused: the tab renders one fixed string for
+    // every failure, so this log is the only place the cause survives.
+    b.list.mockResolvedValueOnce({ ok: false, error: { code: 'plugin/unavailable', message: 'inventory offline' } })
+    await expect(injected.list()).rejects.toThrow('pluginInventory.list failed: plugin/unavailable: inventory offline')
+    expect(logged).toHaveBeenCalledTimes(1)
+    expect(String((logged.mock.calls[0] as readonly unknown[])[0]))
+      .toContain('pluginInventory.list failed: plugin/unavailable: inventory offline')
+
+    // (b) the call never reached the Host, so the Host journal is not a
+    // fallback: a transport fault is logged here or nowhere.
+    const carrier = new Error('pluginInventory.list failed: gateway/internal: '
+      + 'client api: pluginInventory/list failed: Failed to fetch')
+    b.list.mockRejectedValueOnce(carrier)
+    await expect(injected.list()).rejects.toBe(carrier)
+    expect(logged).toHaveBeenCalledTimes(2)
+    expect((logged.mock.calls[1] as readonly unknown[])[0]).toBe(carrier)
+
+    // A read that succeeds logs nothing.
+    await expect(injected.list()).resolves.toEqual(EMPTY)
+    expect(logged).toHaveBeenCalledTimes(2)
+    await b.ctx.fiber.dispose()
+  })
+
   it('follows locale and recovers across late declaration and declarer reload', async () => {
     const b = await bench()
     const fiber = b.ctx.plugin({ inject: [...inject], apply })

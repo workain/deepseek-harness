@@ -35,11 +35,21 @@ export function apply(ctx: ClientContext): void {
 
   const t = ctx.locale.bind(NS)
   const list: PluginInventorySettingsTabInjected['list'] = async () => {
-    const result = await ctx.remote.pluginInventory.list()
-    if (!result.ok) {
-      throw new Error(`pluginInventory.list failed: ${result.error.code}: ${result.error.message}`)
+    try {
+      const result = await ctx.remote.pluginInventory.list()
+      if (!result.ok) {
+        throw new Error(`pluginInventory.list failed: ${result.error.code}: ${result.error.message}`)
+      }
+      return result.value
     }
-    return result.value
+    catch (error) {
+      // The tab renders one fixed string for every failure, so this is the
+      // only place the cause survives. Two of the three causes never reach the
+      // Host at all — a transport fault and a retired mount both fail in the
+      // page — so the Host journal is not a fallback for them.
+      ctx.logger.error(error)
+      throw error
+    }
   }
   // Resolved per call over ui-agent-preset's dictionaries, so a language
   // switch re-resolves shipped names; user-authored metadata passes through.
