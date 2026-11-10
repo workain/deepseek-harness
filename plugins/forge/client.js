@@ -9,7 +9,7 @@ window.__ModuleLoader__.load({
       title:'GitHub and GitLab', name:'Name', type:'Type', key:'Key', workspaces:'Workspaces',
       add:'Add connection', save:'Save', remove:'Remove', cancel:'Cancel', refresh:'Reload',
       stored:'Saved — enter a new key to replace', enter:'Enter key', choose:'Choose workspaces',
-      empty:'No connections configured.', loading:'Loading…', error:'Could not save. Reload and inspect the table before trying again.',
+      empty:'No connections configured.', loading:'Loading…', error:'Some changes may have been saved. Inspect the refreshed table before retrying; if reload failed, reload it manually.',
       confirm:'Remove this connection and its bindings?', move:'Some selected workspaces use another key. Replace their connection?',
       host:'Server address', done:'Saved.', unknown:'Unavailable workspace',
     };
@@ -17,7 +17,7 @@ window.__ModuleLoader__.load({
       title:'GitHub и GitLab', name:'Название', type:'Тип', key:'Ключ', workspaces:'Воркспейсы',
       add:'Добавить подключение', save:'Сохранить', remove:'Удалить', cancel:'Отмена', refresh:'Обновить',
       stored:'Сохранён — введите новый для замены', enter:'Введите ключ', choose:'Выбрать воркспейсы',
-      empty:'Подключения не настроены.', loading:'Загрузка…', error:'Не удалось сохранить. Обновите и проверьте таблицу перед повтором.',
+      empty:'Подключения не настроены.', loading:'Загрузка…', error:'Часть изменений могла сохраниться. Проверьте обновлённую таблицу перед повтором; если загрузка не удалась, обновите её вручную.',
       confirm:'Удалить подключение и его привязки?', move:'Некоторые выбранные воркспейсы используют другой ключ. Заменить их подключение?',
       host:'Адрес сервера', done:'Сохранено.', unknown:'Недоступный воркспейс',
     };
@@ -28,6 +28,9 @@ window.__ModuleLoader__.load({
       const [name,setName] = useState(connection.name), [provider,setProvider] = useState(connection.provider);
       const [host,setHost] = useState(connection.host), [token,setToken] = useState(''), [selected,setSelected] = useState(initial);
       const [dirty,setDirty] = useState(newRow);
+      useEffect(()=>{
+        if(!dirty){setName(connection.name);setProvider(connection.provider);setHost(connection.host);setSelected(initial());}
+      },[connection,state.workspaceBindings,dirty]);
       const workspaces = [...state.workspaces];
       for (const id of selected) if(!workspaces.some(w=>w.id===id)) workspaces.push({id,title:t('unknown')});
       const edit = setter => event => {setter(event.target.value);setDirty(true);};
@@ -35,11 +38,12 @@ window.__ModuleLoader__.load({
         const current = state.workspaceBindings;
         if(selected.some(id=>current[id]&&current[id]!==connection.id)&&!window.confirm(t('move')))return;
         const secret=token;setToken('');
-        await perform(async post => {
+        const saved = await perform(async post => {
           await post({action:'save',connection:{id:connection.id,name,provider,host},...(secret?{token:secret}:{})});
           for(const id of initial()) if(!selected.includes(id)) await post({action:'unbindWorkspace',workspaceId:id});
           for(const id of selected) if(current[id]!==connection.id) await post({action:'bindWorkspace',workspaceId:id,connectionId:connection.id});
         });
+        if(saved){setDirty(false);if(newRow)close();}
       };
       return h('tr',null,
         h('td',{style:cell},h('input',{'aria-label':t('name'),value:name,required:true,maxLength:120,style:control,disabled:busy,onChange:edit(setName)}),
@@ -59,7 +63,7 @@ window.__ModuleLoader__.load({
     }
     function Settings({t}) {
       const [state,setState] = useState(null), [busy,setBusy] = useState(false), [message,setMessage] = useState('');
-      const [draft,setDraft] = useState(null), [revision,setRevision] = useState(0);
+      const [draft,setDraft] = useState(null);
       const lifetime = useRef(null), flight = useRef(false);
       async function request(input, signal) {
         const response = await fetch(input?'/api/workain-forge.mutate':'/api/workain-forge',{credentials:'same-origin',cache:'no-store',signal,
@@ -75,8 +79,16 @@ window.__ModuleLoader__.load({
           if(operation) await operation(input=>request(input,controller.signal));
           const result=await request(undefined,controller.signal);
           if(controller.signal.aborted)return;
-          setState(result);setRevision(value=>value+1);setDraft(null);if(operation)setMessage(t('done'));
-        } catch {if(!controller.signal.aborted)setMessage(t('error'));}
+          setState(result);if(operation)setMessage(t('done'));return true;
+        } catch {
+          if(!controller.signal.aborted){
+            try {
+              const result=await request(undefined,controller.signal);
+              if(!controller.signal.aborted){setState(result);setDraft(current=>current&&result.connections.some(connection=>connection.id===current.id)?null:current);}
+            } catch (error) { void error; /* Keep the error visible when readback is unavailable; never retry the write. */ }
+            if(!controller.signal.aborted)setMessage(t('error'));
+          }
+        }
         finally {flight.current=false;if(!controller.signal.aborted)setBusy(false);}
       }
       useEffect(()=>{const controller=new AbortController();lifetime.current=controller;perform();return()=>{controller.abort();lifetime.current=null;};},[]);
@@ -87,7 +99,7 @@ window.__ModuleLoader__.load({
         h('div',{role:'status',style:{minHeight:24}},busy?t('loading'):message),
         h('div',{style:{overflowX:'auto'}},h('table',{style:{width:'100%',borderCollapse:'collapse',tableLayout:'fixed',minWidth:520}},
           h('thead',null,h('tr',null,...['name','type','key','workspaces'].map(key=>h('th',{key,scope:'col',style:cell},t(key))))),
-          h('tbody',null,...(state?.connections??[]).map(connection=>h(Row,{key:connection.id+'-'+revision,connection,state,busy,perform,t})),
+          h('tbody',null,...(state?.connections??[]).map(connection=>h(Row,{key:connection.id,connection,state,busy,perform,t})),
             draft?h(Row,{key:draft.id,connection:draft,state,busy,perform,t,newRow:true,close:()=>setDraft(null)}):null,
             state&&!state.connections.length&&!draft?h('tr',null,h('td',{colSpan:4,style:cell},t('empty'))):null))),
       );
