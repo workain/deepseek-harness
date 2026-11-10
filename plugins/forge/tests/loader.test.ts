@@ -12,6 +12,9 @@ import LocalCredentials from '@deepseek-ai/dsh-credentials-local'
 import * as Forge from '../index.js'
 
 test('YAML Loader composition commits owner settings and retracts registrations on disposal', async t => {
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('{"login":"loader-account"}')
+  t.after(() => {globalThis.fetch = previousFetch})
   const root = await mkdtemp(join(tmpdir(), 'forge-loader-'))
   const ctx = new Context()
   t.after(async () => { await ctx.fiber.dispose(); await rm(root, {recursive:true, force:true}) })

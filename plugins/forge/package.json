@@ -1,6 +1,6 @@
 {
   "name": "@workain/dsh-forge",
-  "version": "0.1.5",
+  "version": "0.1.7",
   "description": "Shared GitHub and GitLab connections with workspace and folder bindings for DSH",
   "type": "module",
   "main": "lib/index.js",

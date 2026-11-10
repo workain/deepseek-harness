@@ -32,14 +32,15 @@ function fixture(approval: (request: any) => Promise<string> = async () => 'reje
 }
 
 test('JSON-escaped quotes and backslashes in tokens are redacted from API and test-account results', async t => {
+  const previous = globalThis.fetch
+  globalThis.fetch = async () => new Response('{"login":"test-account"}')
+  t.after(() => {globalThis.fetch = previous})
   const f = fixture()
   t.after(async () => { for (const stop of [...f.effects].reverse()) await stop() })
   const token = 'test-quote"and-backslash\\token'
   assert.equal((await f.post({action:'save',connection:{id:'special',name:'Special',provider:'github',host:'github.com'},token})).status, 200)
   assert.equal((await f.post({action:'bindWorkspace',workspaceId:'workspace',connectionId:'special'})).status, 200)
-  const previous = globalThis.fetch
   globalThis.fetch = async () => new Response(JSON.stringify({login:token,echo:token,[token]:{deep:token}}))
-  t.after(() => {globalThis.fetch = previous})
   const raw = await f.tools.get('forge_request').execute({path:'repos/o/r/issues'}, {agent:{session:{id:'session'}}, signal:new AbortController().signal})
   assert.ok(!raw.includes(token)); assert.ok(!raw.includes(JSON.stringify(token).slice(1,-1)))
   assert.deepEqual(JSON.parse(raw), {login:'[REDACTED]',echo:'[REDACTED]','[REDACTED]':{deep:'[REDACTED]'}})
@@ -80,6 +81,9 @@ test('plugin disposal cancels a stalled incoming body and waits for the request 
 })
 
 test('plugin disposal aborts pending write approval before draining admitted requests', {timeout:1000}, async t => {
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('{"login":"approval-account"}')
+  t.after(() => {globalThis.fetch = previousFetch})
   const entered = Promise.withResolvers<void>()
   const caller = new AbortController()
   let aborted = false

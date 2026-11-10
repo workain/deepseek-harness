@@ -52,7 +52,23 @@ export function apply(ctx, config = {}) {
         const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         signal.throwIfAborted();
         switch (input.action) {
-          case 'save': await manager.saveConnection(input.connection, input.token || undefined); break;
+          case 'save': {
+            const verification = await manager.saveConnection(input.connection, input.token || undefined, async candidate => {
+              let user;
+              try { user = await requestJson(candidate,{path:'user',signal},options); }
+              catch (error) {
+                signal.throwIfAborted();
+                if (!(error instanceof TransportError)) throw error;
+                return {state:'failed',checkedAt:new Date().toISOString()};
+              }
+              signal.throwIfAborted();
+              const login = candidate.provider === 'github' ? user?.login : user?.username;
+              const checkedAt = new Date().toISOString();
+              if (typeof login !== 'string' || !/^[A-Za-z0-9_.@-]{1,255}$/.test(login) || login.includes(candidate.token)) return {state:'failed',checkedAt};
+              return {state:'verified',checkedAt,login};
+            });
+            return response({...await settings(), ...(verification.state === 'failed' ? {warning:'verification-failed'} : {})});
+          }
           case 'remove': await manager.removeConnection(input.id); break;
           case 'bindWorkspace': {
             if (!(await ctx.workspaceRegistry.list()).some(workspace => workspace.id === input.workspaceId)) throw new Error('Unknown workspace.');

@@ -4,7 +4,9 @@ import { isAbsolute, relative, sep } from 'node:path'
 import { credentialKey, type CredentialProvider, type CredentialRecord } from '@deepseek-ai/dsh-credentials'
 
 export type Provider = 'github' | 'gitlab'
-export interface Connection { id: string; name: string; provider: Provider; host: string }
+export interface Verification { state: 'verified' | 'failed' | 'unverified'; checkedAt?: string; login?: string }
+export interface Connection { id: string; name: string; provider: Provider; host: string; verification?: Verification }
+export type ConnectionInput = Omit<Connection, 'verification'>
 export interface ResolvedConnection extends Connection { token: string }
 export interface Configuration {
   connections: Connection[]
@@ -33,13 +35,22 @@ export function normalizeHost(host: string): string {
   }
   return url.origin
 }
+function verification(value: unknown): Verification {
+  if (value === undefined) return { state: 'unverified' }
+  if (!object(value) || !['verified', 'failed', 'unverified'].includes(String(value.state))) return fail('Stored verification is invalid.')
+  if (value.state === 'unverified') return {state:'unverified'}
+  if (typeof value.checkedAt !== 'string' || !Number.isFinite(Date.parse(value.checkedAt))) return fail('Stored verification time is invalid.')
+  if (value.state === 'failed') return {state:'failed',checkedAt:value.checkedAt}
+  if (typeof value.login !== 'string' || !/^[A-Za-z0-9_.@-]{1,255}$/.test(value.login)) return fail('Stored verification account is invalid.')
+  return {state:'verified',checkedAt:value.checkedAt,login:value.login}
+}
 function connection(value: unknown): ResolvedConnection {
   if (!object(value) || typeof value.id !== 'string' || !ID.test(value.id)
     || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 120
     || (value.provider !== 'github' && value.provider !== 'gitlab')
     || typeof value.host !== 'string' || typeof value.token !== 'string' || !value.token.trim()
     || /[\r\n]/.test(value.token)) return fail('Stored connection is invalid; repair it in integration settings.')
-  return { id: value.id, name: value.name.trim(), provider: value.provider, host: normalizeHost(value.host), token: value.token }
+  return { id: value.id, name: value.name.trim(), provider: value.provider, host: normalizeHost(value.host), token: value.token, verification: verification(value.verification) }
 }
 function bindings(value: unknown): Record<string, string> {
   if (!object(value) || Object.entries(value).some(([key, id]) => !key || typeof id !== 'string' || !ID.test(id))) {
@@ -81,15 +92,25 @@ export class ConnectionManager {
     })
   }
   async list(): Promise<Configuration> { return publicConfiguration(await this.document()) }
-  async saveConnection(input: Connection, token?: string): Promise<void> {
-    await this.mutate(document => {
-      const existing = document.connections.find(item => item.id === input.id)
-      const next = connection({ ...input, token: token ?? existing?.token })
-      if (existing && (existing.provider !== next.provider || existing.host !== next.host)) {
-        fail('Create a new connection identifier when changing provider or host.')
-      }
-      document.connections = [...document.connections.filter(item => item.id !== next.id), next]
+  /** Verify outside the credential lock, then atomically commit token and its result if this connection has not changed. */
+  async saveConnection(input: ConnectionInput, token?: string, verify?: (candidate: ResolvedConnection) => Promise<Verification>): Promise<Verification> {
+    const document = await this.document()
+    const existing = document.connections.find(item => item.id === input.id)
+    const next = connection({ ...input, token: token ?? existing?.token,
+      verification: token === undefined ? existing?.verification : {state:'unverified'} })
+    if (existing && (existing.provider !== next.provider || existing.host !== next.host)) {
+      fail('Create a new connection identifier when changing provider or host.')
+    }
+    const result = verification(verify ? await verify({...next, verification:{state:'unverified'}}) : next.verification)
+    // Authentication responses must not be able to reflect the candidate secret through an account field.
+    if (result.login?.includes(next.token)) return fail('Verification account is invalid.')
+    next.verification = result
+    await this.mutate(current => {
+      const live = current.connections.find(item => item.id === input.id)
+      if (JSON.stringify(live) !== JSON.stringify(existing)) fail('The connection changed during verification. Reload settings before saving again.')
+      current.connections = [...current.connections.filter(item => item.id !== next.id), next]
     })
+    return {...result}
   }
   async removeConnection(id: string): Promise<void> {
     await this.mutate(document => {

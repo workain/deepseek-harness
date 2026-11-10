@@ -36,8 +36,8 @@ test('saving one inline row preserves another row name, secret and workspace dra
   let Component: any
   const state = {
     connections:[
-      {id:'alpha',name:'Alpha',provider:'github',host:'https://github.com'},
-      {id:'beta',name:'Beta',provider:'gitlab',host:'https://gitlab.com'},
+      {id:'alpha',name:'Alpha',provider:'github',host:'https://github.com',verification:{state:'verified',login:'account',checkedAt:'2026-11-10T12:00:00Z'}},
+      {id:'beta',name:'Beta',provider:'gitlab',host:'https://gitlab.com',verification:{state:'failed',checkedAt:'2026-11-10T12:00:00Z'}},
     ],
     workspaces:[{id:'one',title:'Workspace One'},{id:'two',title:'Workspace Two'}],
     workspaceBindings:{} as Record<string,string>, folderBindings:{},
@@ -64,7 +64,13 @@ test('saving one inline row preserves another row name, secret and workspace dra
       return {ok:true,json:async () => structuredClone(state)}
     },
   })
-  const plugin = module.factory((id: string) => {assert.equal(id,'react');return React})
+  const primitives = {
+    Button: ({children,size,variant,...props}: any) => React.createElement('button',props,children),
+    Input: (props: any) => React.createElement('input',props),
+    Checkbox: ({label,checked,onChange,disabled,className}: any) => React.createElement('label',{className},React.createElement('input',{type:'checkbox',checked,disabled,onChange:(event: any)=>onChange(event.target.checked)}),label),
+    Tag: ({children,tone}: any) => React.createElement('span',{'data-tone':tone},children),
+  }
+  const plugin = module.factory((id: string) => {assert.ok(['react','@deepseek-ai/dsh-client-ui-primitives'].includes(id));return id==='react'?React:primitives})
   const tKey = (key: string) => key
   plugin.apply({
     effect:(setup: () => unknown) => setup(),
@@ -78,6 +84,8 @@ test('saving one inline row preserves another row name, secret and workspace dra
   const key = (row: Element) => row.querySelector('input[type="password"]') as HTMLInputElement
   const button = (row: Element, label: string) => [...row.querySelectorAll('button')].find(item => item.textContent === label)!
   assert.equal(rows().length,2)
+  assert.match(rows()[0]!.textContent!,/verified/)
+  assert.match(rows()[1]!.textContent!,/failed/)
   await React.act(async () => {
     Simulate.change(name(rows()[0]!),{target:{value:'Alpha edited'}})
     Simulate.change(name(rows()[1]!),{target:{value:'Beta unsaved'}})
@@ -116,4 +124,13 @@ test('saving one inline row preserves another row name, secret and workspace dra
   assert.equal((rows()[0]!.querySelectorAll('input[type="checkbox"]')[1] as HTMLInputElement).checked,true)
   assert.equal((rows()[1]!.querySelectorAll('input[type="checkbox"]')[1] as HTMLInputElement).checked,false,'a clean row must lose a workspace reassigned to another connection')
   assert.equal(key(rows()[1]!).value,'','the submitted key must not be restored from server readback')
+  assert.equal(rows()[0]!.querySelectorAll('.forge-chip').length,2)
+  assert.equal(rows()[0]!.querySelector('details:last-child')?.hasAttribute('open'),false)
+  await React.act(async () => button(rows()[0]!,'clear').click())
+  assert.equal(rows()[0]!.querySelectorAll('.forge-chip').length,0)
+  await React.act(async () => button(rows()[0]!,'all').click())
+  assert.equal(rows()[0]!.querySelectorAll('.forge-chip').length,2)
+  assert.match(rows()[0]!.textContent!,/githubHint/)
+  assert.match(rows()[1]!.textContent!,/gitlabHint/)
+  assert.equal(rows()[0]!.querySelector('a')?.getAttribute('href')?.startsWith('https://docs.github.com/'),true)
 })

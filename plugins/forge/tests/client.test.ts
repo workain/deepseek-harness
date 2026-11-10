@@ -8,7 +8,7 @@ test('browser module registers localized settings and keeps saved tokens out of 
   let definition: { factory: (require: (id: string) => object) => { apply: (ctx: object) => void } } | undefined
   vm.runInNewContext(source, {window: {__ModuleLoader__: {load(value: typeof definition) { definition = value }}}})
   assert.ok(definition)
-  const plugin = definition.factory(id => { assert.equal(id, 'react'); return { createElement: () => undefined } })
+  const plugin = definition.factory(id => { assert.ok(['react','@deepseek-ai/dsh-client-ui-primitives'].includes(id)); return id === 'react' ? { createElement: () => undefined } : {} })
   const dictionaries: Record<string, Record<string, string>>[] = []
   let registration: {id: string; label: () => string} | undefined
   plugin.apply({
