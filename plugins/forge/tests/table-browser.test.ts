@@ -78,7 +78,11 @@ test('saving one inline row preserves another row name, secret and workspace dra
     slots:{inject:(_slot: string, setup: () => unknown) => setup(),register:(_options: object, component: any) => {Component=component;return () => {}}},
   })
   root = createRoot(dom.window.document.getElementById('root'))
-  await React.act(async () => root.render(React.createElement(Component,{t:tKey})))
+  await React.act(async () => root.render(React.createElement(Component,{view:'summary',t:tKey})))
+  assert.equal(dom.window.document.querySelectorAll('table').length,0,'list and header render only description')
+  assert.equal(dom.window.document.getElementById('root')!.textContent,'description')
+  assert.equal(writes.length,0)
+  await React.act(async () => root.render(React.createElement(Component,{view:'page',t:tKey})))
   const rows = () => [...dom.window.document.querySelectorAll('tbody tr')]
   const name = (row: Element) => row.querySelector('input[aria-label="name"]') as HTMLInputElement
   const key = (row: Element) => row.querySelector('input[type="password"]') as HTMLInputElement

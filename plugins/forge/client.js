@@ -7,6 +7,7 @@ window.__ModuleLoader__.load({
     const {useState, useEffect, useRef} = React;
     const NS = 'workainForge';
     const en = {
+      description:'Shared GitHub and GitLab access tokens with workspace bindings.',
       title:'GitHub and GitLab', name:'Name', type:'Type', key:'Key', workspaces:'Workspaces',
       add:'Add connection', save:'Save', remove:'Remove', cancel:'Cancel', refresh:'Reload',
       stored:'Saved — enter a new key to replace', enter:'Enter key', choose:'Choose workspaces',
@@ -19,6 +20,7 @@ window.__ModuleLoader__.load({
       verificationDetail:'Connected at the recorded time; repository permissions must be checked separately.', verificationWarning:'Saved, but connection verification failed. Check the token, server and access rights.',
     };
     const ru = {
+      description:'Общие токены доступа GitHub и GitLab с привязкой к воркспейсам.',
       title:'GitHub и GitLab', name:'Название', type:'Тип', key:'Ключ', workspaces:'Воркспейсы',
       add:'Добавить подключение', save:'Сохранить', remove:'Удалить', cancel:'Отмена', refresh:'Обновить',
       stored:'Сохранён — введите новый для замены', enter:'Введите ключ', choose:'Выбрать воркспейсы',
@@ -147,10 +149,13 @@ window.__ModuleLoader__.load({
       );
     }
 
+    function PluginItem({view,t}) {
+      return view === 'page' ? h(Settings,{t}) : t('description');
+    }
     return {inject:['slots','locale'],apply(ctx) {
       ctx.effect(()=>ctx.locale.register(NS,{en,ru,zh:en}));
       const t=ctx.locale.bind(NS);
-      ctx.effect(()=>ctx.slots.inject('plugins.item',()=>ctx.slots.register({name:'plugins.item',id:'workain-forge',order:75,label:()=>t('title'),locale:NS,inject:()=>({t})},Settings)));
+      ctx.effect(()=>ctx.slots.inject('plugins.item',()=>ctx.slots.register({name:'plugins.item',id:'workain-forge',order:75,label:()=>t('title'),locale:NS,inject:()=>({t})},PluginItem)));
     }};
   },
 });

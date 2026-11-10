@@ -10,7 +10,7 @@ test('browser module registers localized settings and keeps saved tokens out of 
   assert.ok(definition)
   const plugin = definition.factory(id => { assert.ok(['react','@deepseek-ai/dsh-client-ui-primitives'].includes(id)); return id === 'react' ? { createElement: () => undefined } : {} })
   const dictionaries: Record<string, Record<string, string>>[] = []
-  let registration: {id: string; label: () => string} | undefined
+  let registration: {id: string; label: () => string; inject: () => {t: (key: string) => string}} | undefined
   plugin.apply({
     effect: (start: () => unknown) => start(),
     locale: {register: (_ns: string, value: Record<string, Record<string, string>>) => { dictionaries.push(value); return () => undefined }, bind: () => (key: string) => key},
@@ -18,6 +18,7 @@ test('browser module registers localized settings and keeps saved tokens out of 
   })
   assert.equal(registration?.id, 'workain-forge')
   assert.equal(registration?.label(), 'title')
+  assert.equal(registration?.inject().t('description'),'description')
   assert.deepEqual(Object.keys(dictionaries[0]!.en!).sort(), Object.keys(dictionaries[0]!.ru!).sort())
   assert.match(source, /type:'password'/)
   assert.doesNotMatch(source, /localStorage|sessionStorage|innerHTML/)
