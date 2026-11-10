@@ -55,6 +55,15 @@ test('caller cwd chooses connection; tools cannot return or select tokens', asyn
   assert.ok(!(await response.text()).includes('secret'))
 })
 
+test('GET accepts an empty schema body but refuses a nonempty request body', async t => {
+  const f = await fixture(t)
+  const request = f.tools.get('forge_request')
+  await request.execute({path:'repos/o/r/branches',method:'GET',body:''},f.exec)
+  assert.equal(f.fetches(),1)
+  await assert.rejects(request.execute({path:'repos/o/r/branches',method:'GET',body:'{}'},f.exec),/cannot have a body/)
+  assert.equal(f.fetches(),1)
+})
+
 test('rejected, unavailable or cancelled approval cannot dispatch a write', async t => {
   const f = await fixture(t)
   for (const decision of ['rejected', 'unavailable', 'cancelled']) {

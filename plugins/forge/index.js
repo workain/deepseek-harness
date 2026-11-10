@@ -134,9 +134,9 @@ export function apply(ctx, config = {}) {
       // GitHub places credential management below actions as well as account APIs.
       const sensitive = selected.provider === 'github' && /^repos\/[^/]+\/[^/]+\/actions\/(secrets|variables|runners)(\/|$)/.test(pathname);
       if (!allowed || sensitive) throw new Error('Only repository issue, change request, CI and source APIs are supported.');
-      if (method === 'GET' && args.body !== undefined) throw new Error('GET requests cannot have a body.');
+      if (method === 'GET' && args.body !== undefined && args.body !== '') throw new Error('GET requests cannot have a body.');
       if (args.body !== undefined && (typeof args.body !== 'string' || Buffer.byteLength(args.body) > LIMIT)) throw new Error('Invalid request body.');
-      const body = args.body === undefined ? undefined : JSON.parse(args.body);
+      const body = args.body === undefined || args.body === '' ? undefined : JSON.parse(args.body);
       if (method !== 'GET') {
         const approval = await ctx.approval.request({agent:exec.agent,toolName:'forge_request',callId:exec.callId,
           reason:`${selected.name}: ${method} ${args.path}\n${args.body ?? ''}`,signal:AbortSignal.any([exec.signal,lifetime.signal])});
