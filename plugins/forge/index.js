@@ -138,9 +138,12 @@ export function apply(ctx, config = {}) {
       if (args.body !== undefined && (typeof args.body !== 'string' || Buffer.byteLength(args.body) > LIMIT)) throw new Error('Invalid request body.');
       const body = args.body === undefined || args.body === '' ? undefined : JSON.parse(args.body);
       if (method !== 'GET') {
-        const approval = await ctx.approval.request({agent:exec.agent,toolName:'forge_request',callId:exec.callId,
+        const fullAccess = ctx.permissionPresets?.current(exec.agent.session) === 'danger-full-access';
+         if (!fullAccess) {
+           const approval = await ctx.approval.request({agent:exec.agent,toolName:'forge_request',callId:exec.callId,
           reason:`${selected.name}: ${method} ${args.path}\n${args.body ?? ''}`,signal:AbortSignal.any([exec.signal,lifetime.signal])});
         if (approval !== 'allowed-once') throw new Error('Code-host write was not approved.');
+         }
         // Never approve against one token/binding and dispatch using a different account after a settings edit.
         const current = await manager.resolve(await context(exec));
         if (JSON.stringify(current) !== JSON.stringify(selected)) throw new Error('Connection changed; review a new request.');
